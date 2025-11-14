@@ -11,5 +11,7 @@ app.use(express.json());
 
 app.use("/api/email", emailRoutes);
 
+console.log("Server is starting...");
+
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
