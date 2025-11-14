@@ -103,10 +103,8 @@ Text:
 
       const extraction = await extractor.generateContent(extractorPrompt);
       const text = extraction?.response?.text?.() || "";
-      // Attempt structured access first
       let parsedExtract = extraction?.response?.parsed;
       if (!parsedExtract) {
-        // Fallback: slice to JSON braces
         const start = text.indexOf("{");
         const end = text.lastIndexOf("}");
         parsedExtract =
@@ -120,7 +118,6 @@ Text:
       company = sanitizeText(parsedExtract.company, "the company");
       location = sanitizeText(parsedExtract.location, "India");
     } catch (err) {
-      // Safe, deterministic defaults
       name ||= "Candidate";
       jobRole ||= "Software Engineer";
       company ||= "the company";
@@ -143,16 +140,24 @@ Text:
   const safeSkills = sanitizeText(skills, "Java, Python, JavaScript, React, and Node.js");
   const safeCompanyPhone = sanitizeText(companyPhone, "N/A");
 
+  // Extract primary skill keyword: first skill or last word of jobRole
+  const mainSkillKeyword = (() => {
+    const skillList = safeSkills.split(",").map((s) => s.trim()).filter(Boolean);
+    if (skillList.length > 0) return skillList[0];
+    const words = safeJobRole.split(" ").filter(Boolean);
+    return words.length > 0 ? words[words.length - 1] : safeJobRole;
+  })();
+
   // -------------------------------
-  // Step 3: Build main prompt
+  // Step 3: Build main prompt for fully AI-generated email with skill emphasis
   // -------------------------------
-  const systemInstruction = `You are a professional corporate HR communication assistant. Use formal, concise business English, no contractions, and return only valid JSON that conforms to the schema.`;
+  const systemInstruction = `You are a professional corporate HR communication assistant. Use formal, concise business English, no contractions, and return only valid JSON that conforms to the given schema.`;
 
   const prompt = `
 Return only JSON with:
 {
   "subject": "Application for [Job Role] – [Name]",
-  "body": "Full professional email content using \\n as new lines"
+  "body": "Full professional email content using \\n as new lines, including the key skill or technology prominently."
 }
 
 Context:
@@ -162,6 +167,7 @@ Context:
 - Applicant Location: ${safeLocation}
 - Applicant Education: ${safeEducation}
 - Applicant Skills: ${safeSkills}
+- Primary Skill or Technology: ${mainSkillKeyword}
 - Job Role: ${safeJobRole}
 - Company: ${safeCompany}
 - HR Name: ${safeHrName}
@@ -169,31 +175,30 @@ Context:
 - Company Phone: ${safeCompanyPhone}
 
 Guidelines:
-- Greeting: "Dear ${safeHrName},"
-- Use 2–3 paragraphs: introduction/purpose, fit/skills, courteous closing.
-- Keep subject under 90 characters; include role and name.
+- Start with a formal greeting: "Dear ${safeHrName},"
+- Compose 2–3 paragraphs covering introduction/purpose, relevant skills focusing on the primary skill "${mainSkillKeyword}", and courteous closing.
+- Keep the subject under 90 characters, including role and applicant name.
 - Maintain a respectful, confident tone without exaggeration.
-- Close with "Sincerely," and a signature block: name, location, email, phone.
+- Close with "Sincerely," followed by name, location, email, and phone.
 `;
 
   // -------------------------------
-  // Step 4: Model call with schema enforcement
+  // Step 4: Model call with schema enforcement - Fully AI-driven email generation
   // -------------------------------
-  try {
-    const model = genAI.getGenerativeModel({
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: emailSchema,
-        temperature: 0.3,
-      },
-      systemInstruction,
-    });
+  const model = genAI.getGenerativeModel({
+    model: "gemini-2.5-flash",
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: emailSchema,
+      temperature: 0.3,
+    },
+    systemInstruction,
+  });
 
+  try {
     const result = await model.generateContent(prompt);
     const text = result?.response?.text?.() || "";
 
-    // Prefer structured parsed output if present
     let parsed = result?.response?.parsed;
     if (!parsed) {
       try {
@@ -205,7 +210,6 @@ Guidelines:
       }
     }
 
-    // Validate and sanitize
     if (!parsed || typeof parsed.subject !== "string" || typeof parsed.body !== "string") {
       throw new Error("Invalid response JSON.");
     }
@@ -213,7 +217,6 @@ Guidelines:
     const subject = sanitizeText(parsed.subject, `Application for ${safeJobRole} – ${safeName}`);
     const body = toPlainMultiline(parsed.body);
 
-    // Optional: ensure max subject length (~90 chars) as best practice for clarity
     const finalSubject =
       subject.length > 90 ? `${subject.slice(0, 87).trim()}...` : subject;
 
@@ -222,23 +225,16 @@ Guidelines:
       body,
     };
   } catch (err) {
-    // -------------------------------
-    // Step 5: Robust fallback
-    // -------------------------------
- // Step 5: Extra formal fallback using your requested template
-const fallbackSubject = `Application for ${safeJobRole} – ${safeName}`;
-const fallbackBody =
-  `Dear ${safeHrName},\n\n` +
-  `I am writing to formally express my interest in the ${safeJobRole} position at ${safeCompany}. With a strong academic background in ${safeEducation} and comprehensive experience in ${safeSkills}, I am eager to contribute to your esteemed organization and align my professional aspirations with your company’s values.\n\n` +
-  `Throughout my academic and project work, I have consistently demonstrated dedication, resourcefulness, and adaptability, attributes which I am confident will enable me to add value to your team. My technical proficiency and commitment to continuous improvement position me as a strong candidate for this role.\n\n` +
-  `I would appreciate the opportunity to further discuss my qualifications and how they align with your requirements. Thank you for considering my application. I look forward to the possibility of contributing to ${safeCompany}.\n\n` +
-  `Sincerely,\n` +
-  `${safeName}\n` +
-  `${safeLocation}\n` +
-  `Email: ${safeUserEmail}\n` +
-  `Phone: ${safeUserPhone}`;
+    // If AI call fails, provide a simple fallback message
+    const fallbackSubject = `Application for ${safeJobRole} – ${safeName}`;
+    const fallbackBody =
+      `Dear ${safeHrName},\n\n` +
+      `I am writing to formally express my interest in the ${safeJobRole} position at ${safeCompany}. ` +
+      `I possess a strong academic background in ${safeEducation} and skills in ${safeSkills}, including ${mainSkillKeyword}. ` +
+      `I am eager to contribute to your organization and grow professionally.\n\n` +
+      `Thank you for considering my application.\n\n` +
+      `Sincerely,\n${safeName}\n${safeLocation}\nEmail: ${safeUserEmail}\nPhone: ${safeUserPhone}`;
 
-return { subject: fallbackSubject, body: fallbackBody };
-
+    return { subject: fallbackSubject, body: fallbackBody };
   }
 }
